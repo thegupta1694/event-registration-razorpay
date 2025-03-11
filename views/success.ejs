@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Registration Successful</title>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .success-container {
+            margin-top: 50px;
+            padding: 30px;
+            border-radius: 5px;
+            background-color: #f8f8f8;
+            border: 1px solid #eee;
+        }
+
+        h1 {
+            color: #2300a3;
+        }
+
+        .success-icon {
+            font-size: 48px;
+            color: #4CAF50;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            background-color: #2300a3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 20px;
+        }
+
+        .btn:hover {
+            background-color: #1a0080;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="success-container">
+        <div class="success-icon">✓</div>
+        <h1>Payment Successful!</h1>
+        <p>Your registration has been confirmed and your payment has been processed successfully.</p>
+        <p id="confirmation-message">You will receive a confirmation email with all the event details shortly.</p>
+        <p>Thank you for registering!</p>
+        <a href="/" class="btn">Return to Home</a>
+    </div>
+
+    <!-- Add Firebase Auth SDK -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+
+    <script>
+        // Parse query parameters to get registration ID if present
+        const urlParams = new URLSearchParams(window.location.search);
+        const registrationId = urlParams.get('regId');
+
+        // Fetch Firebase config from backend instead of hardcoding
+        fetch('/api/get-firebase-config')
+            .then(response => response.json())
+            .then(firebaseConfig => {
+                // Initialize Firebase with fetched config
+                firebase.initializeApp(firebaseConfig);
+                const db = firebase.firestore();
+                const auth = firebase.auth();
+
+                // Sign in anonymously
+                auth.signInAnonymously()
+                    .then(() => {
+                        console.log("Signed in anonymously");
+
+                        if (registrationId) {
+                            // Get registration details
+                            db.collection("registrations").doc(registrationId).get()
+                                .then((doc) => {
+                                    if (doc.exists) {
+                                        const data = doc.data();
+                                        document.getElementById("confirmation-message").innerHTML =
+                                            `A confirmation email has been sent to <strong>${data.email}</strong> with your registration details.`;
+                                    }
+                                })
+                                .catch((error) => {
+                                    console.error("Error fetching registration: ", error);
+                                });
+                        }
+                    })
+                    .catch((error) => {
+                        console.error("Anonymous sign-in error:", error);
+                    });
+            })
+            .catch(error => {
+                console.error("Error loading Firebase config:", error);
+                alert("Error loading registration details. Please contact support.");
+            });
+    </script>
+</body>
+
+</html>
