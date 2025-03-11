@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Event Registration Payment</title>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
+	<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+	<!-- Firebase SDK -->
+	<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+	<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+	<style>
+		body {
+			font-family: Arial, sans-serif;
+			max-width: 600px;
+			margin: 0 auto;
+			padding: 20px;
+		}
+
+		h2 {
+			color: #2300a3;
+		}
+
+		form {
+			margin-top: 20px;
+		}
+
+		.form-group {
+			margin-bottom: 15px;
+		}
+
+		label {
+			display: block;
+			margin-bottom: 5px;
+		}
+
+		input[type="text"],
+		input[type="email"],
+		select,
+		textarea {
+			width: 100%;
+			padding: 8px;
+			border: 1px solid #ddd;
+			border-radius: 4px;
+		}
+
+		.form-row {
+			display: flex;
+			gap: 15px;
+		}
+
+		.form-row .form-group {
+			flex: 1;
+		}
+
+		input[type="submit"] {
+			background-color: #2300a3;
+			color: white;
+			border: none;
+			padding: 10px 20px;
+			border-radius: 4px;
+			cursor: pointer;
+		}
+
+		input[type="submit"]:hover {
+			background-color: #1a0080;
+		}
+	</style>
+</head>
+
+<body>
+	<h2>Event Registration</h2>
+	<p><strong>Registration Fee: ₹399</strong></p>
+	<p>Complete your registration by filling in your details below and proceeding to payment.</p>
+
+	<form id="pay-form">
+		<div class="form-group">
+			<label for="name">Full Name:</label>
+			<input type="text" id="name" name="name" required>
+		</div>
+
+		<div class="form-group">
+			<label for="email">Email Address:</label>
+			<input type="email" id="email" name="email" required>
+		</div>
+
+		<div class="form-group">
+			<label for="srn">SRN (Student Registration Number):</label>
+			<input type="text" id="srn" name="srn" required>
+		</div>
+
+		<div class="form-group">
+			<label for="domain">Domain:</label>
+			<input type="text" id="domain" name="domain" required>
+		</div>
+
+		<div class="form-group">
+			<label for="tshirtSize">T-shirt Size:</label>
+			<select id="tshirtSize" name="tshirtSize" required>
+				<option value="">-- Select Size --</option>
+				<option value="XS">XS</option>
+				<option value="S">S</option>
+				<option value="M">M</option>
+				<option value="L">L</option>
+				<option value="XL">XL</option>
+			</select>
+		</div>
+
+		<div class="form-group">
+			<label for="tshirtName">Name to be printed on T-shirt:</label>
+			<input type="text" id="tshirtName" name="tshirtName" required>
+		</div>
+
+		<input type="hidden" name="amount" value="399">
+		<input type="hidden" name="description" value="Event Registration Fee">
+		<input type="submit" value="Proceed to Pay">
+	</form>
+	<!-- Add Firebase Auth SDK -->
+	<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+
+	<script>
+		// Initialize Firebase with config from environment variables
+		// We'll load these from the server instead of hardcoding them
+		let firebaseConfig = null;
+
+		// Fetch Firebase config from backend
+		fetch('/api/get-firebase-config')
+			.then(response => response.json())
+			.then(config => {
+				firebaseConfig = config;
+				// Initialize Firebase with fetched config
+				firebase.initializeApp(firebaseConfig);
+				const db = firebase.firestore();
+				const auth = firebase.auth();
+
+				// Sign in anonymously
+				auth.signInAnonymously()
+					.then(() => {
+						console.log("Signed in anonymously");
+					})
+					.catch((error) => {
+						console.error("Anonymous sign-in error:", error);
+						alert("Error signing in: " + error.message);
+					});
+
+				// Replace the existing form submission code
+				$(document).ready(function () {
+					$('#pay-form').submit(function (e) {
+						e.preventDefault();
+
+						// Check if user is authenticated
+						if (!auth.currentUser) {
+							console.error("User not authenticated");
+							alert("Authentication required. Please refresh the page and try again.");
+
+							// Try to sign in again
+							auth.signInAnonymously()
+								.then(() => {
+									console.log("Signed in on retry");
+									// Call the form submission again
+									$(this).submit();
+								})
+								.catch((error) => {
+									console.error("Authentication retry failed:", error);
+									alert("Error signing in: " + error.message);
+								});
+							return;
+						}
+
+						// Get form data
+						const formData = {
+							name: $('#name').val(),
+							email: $('#email').val(),
+							srn: $('#srn').val(),
+							domain: $('#domain').val(),
+							tshirtSize: $('#tshirtSize').val(),
+							tshirtName: $('#tshirtName').val(),
+							registrationDate: new Date(),
+							paymentStatus: 'pending',
+							userId: auth.currentUser.uid // Add user ID to registration
+						};
+
+						// Get serialized form data for payment request
+						var paymentFormData = $(this).serialize();
+
+						// Save to Firebase
+						db.collection("registrations").add(formData)
+							.then((docRef) => {
+								console.log("Registration saved with ID: ", docRef.id);
+								const registrationId = docRef.id;
+
+								// Now proceed with payment
+								initiatePayment(paymentFormData, registrationId, formData);
+							})
+							.catch((error) => {
+								console.error("Error saving registration: ", error);
+								alert("Error saving registration: " + error.message);
+							});
+					});
+				});
+
+				function initiatePayment(formData, registrationId, userData) {
+					console.log("Initiating payment...");
+					console.log("Payment data:", formData);
+					console.log("Registration ID:", registrationId);
+
+					$.ajax({
+						url: "/api/create-order",
+						type: "POST",
+						data: formData,
+						success: function (res) {
+							console.log("Order creation response:", res);
+							if (res.success) {
+								var options = {
+									"key": res.key_id,
+									"amount": res.amount,
+									"currency": "INR",
+									"name": "Event Registration",
+									"description": res.description,
+									"order_id": res.order_id,
+									"handler": function (response) {
+										console.log("Payment handler called with response:", response);
+										verifyPayment(response, registrationId, userData);
+									},
+									"prefill": {
+										"name": userData.name,
+										"email": userData.email
+									},
+									"theme": { "color": "#2300a3" }
+								};
+								console.log("Razorpay options:", options);
+								var razorpayObject = new Razorpay(options);
+								razorpayObject.on('payment.failed', function (failedResponse) {
+									console.error("Payment failed:", failedResponse);
+									// Update payment status in Firebase
+									db.collection("registrations").doc(registrationId).update({
+										paymentStatus: 'failed',
+										paymentError: failedResponse.error || {},
+										updatedAt: new Date()
+									});
+									alert("Payment Failed. Please try again.");
+								});
+								razorpayObject.open();
+							} else {
+								console.error("Order creation failed:", res.msg);
+								alert(res.msg);
+							}
+						},
+						error: function (err) {
+							console.error("AJAX error in create-order:", err);
+							alert("Error initiating payment: " + (err.responseJSON ? err.responseJSON.msg : "Unknown error"));
+						}
+					});
+				}
+
+				function verifyPayment(response, registrationId, userData) {
+					$.ajax({
+						url: "/api/verify-payment",
+						type: "POST",
+						contentType: "application/json",
+						data: JSON.stringify({
+							razorpay_order_id: response.razorpay_order_id,
+							razorpay_payment_id: response.razorpay_payment_id,
+							razorpay_signature: response.razorpay_signature,
+							userData: userData
+						}),
+						success: function (res) {
+							if (res.success) {
+								// Update payment status in Firebase
+								db.collection("registrations").doc(registrationId).update({
+									paymentStatus: 'completed',
+									paymentId: response.razorpay_payment_id,
+									orderId: response.razorpay_order_id,
+									updatedAt: new Date()
+								}).then(() => {
+									alert("Payment Successful! Registration Complete.");
+									// Add the registration ID to the success page URL
+									window.location.href = "/success?regId=" + registrationId;
+								}).catch((error) => {
+									console.error("Error updating payment status: ", error);
+									alert("Payment successful but there was an error updating your registration. Please contact support.");
+								});
+							} else {
+								// Update payment status in Firebase
+								db.collection("registrations").doc(registrationId).update({
+									paymentStatus: 'verification_failed',
+									updatedAt: new Date()
+								});
+								alert("Payment Verification Failed.");
+							}
+						},
+						error: function (err) {
+							console.error(err);
+							alert("Error verifying payment. Please contact support.");
+						}
+					});
+				}
+
+				// Add global error handler for Firebase operations
+				window.addEventListener('error', function (event) {
+					if (event.message && event.message.includes('firebase')) {
+						console.error('Firebase error detected:', event);
+						alert('There was an issue with our database service. Your data has been saved locally. Please contact support with reference: ' + Date.now());
+
+						// Save registration data locally as fallback
+						try {
+							const formDataJSON = JSON.stringify({
+								formData: $('#pay-form').serialize(),
+								timestamp: new Date().toISOString()
+							});
+							localStorage.setItem('pendingRegistration', formDataJSON);
+						} catch (e) {
+							console.error('Failed to save backup:', e);
+						}
+					}
+				}, true);
+			})
+			.catch(error => {
+				console.error("Error loading Firebase config:", error);
+				alert("Error initializing application. Please refresh or contact support.");
+			});
+	</script>
+</body>
+
+</html>
